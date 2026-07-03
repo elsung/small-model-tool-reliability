@@ -13,8 +13,9 @@ The short version: on a real multi-tool write phase, a Gemma-4-12B-class model *
 - [1. The problem](#1-the-problem)
 - [2. What does *not* work: `tool_choice: required`](#2-what-does-not-work-tool_choice-required)
 - [3. What works: grammar-constrained / guided decoding](#3-what-works-grammar-constrained--guided-decoding)
-- [4. The broader landscape (beyond GBNF)](./docs/methodology-landscape.md)
-- [5. Hardware & serving-backend notes](./docs/hardware-notes.md)
+- [4. A tool-calling reliability matrix across models](./docs/model-matrix.md)
+- [5. The broader landscape (beyond GBNF)](./docs/methodology-landscape.md)
+- [6. Hardware & serving-backend notes](./docs/hardware-notes.md)
 - [Appendix: example grammars](./examples/)
 
 ---
@@ -124,13 +125,24 @@ One practical caveat: with an open-ended grammar (`section+`), a large default `
 
 ---
 
-## 4. The broader landscape (beyond GBNF)
+## 4. A tool-calling reliability matrix across models
+
+The result above is one model family. Extending the *same faithful harness* across a fleet of small
+local models (Qwen3 9B/14B, Gemma-4-12B, a 3B, creative Llama-3.2 finetunes) shows the pattern
+generalizes with a twist: **reliability tracks the model family's serving tool-parser maturity, not its
+size** — some models are fine natively and should *not* pay the grammar tax, while others narrate no
+matter what and need the grammar (or a reroute). The per-model numbers, verdicts, and how to gate the
+grammar on measured need:
+
+**→ [docs/model-matrix.md](./docs/model-matrix.md)**
+
+## 5. The broader landscape (beyond GBNF)
 
 Constrained decoding is one family in a larger toolbox — vLLM/SGLang guided decoding, XGrammar, Outlines, lm-format-enforcer, Microsoft `guidance`, JSON-schema structured outputs — with real tradeoffs (the constraint tax, grammar expressiveness, throughput), and complementary approaches (tool-use fine-tunes, better parsers, ReAct/format-then-parse, retry-with-feedback). That survey, with citations and open questions, lives in its own document:
 
 **→ [docs/methodology-landscape.md](./docs/methodology-landscape.md)**
 
-## 5. Hardware & serving-backend notes
+## 6. Hardware & serving-backend notes
 
 How the technique interacts with consumer/prosumer GPU classes (Pascal P40/P100, Blackwell RTX 5070, Intel Arc B70 / SYCL, Apple M2 Ultra / Metal) and the serving backend (llama.cpp Metal / CUDA / SYCL):
 
