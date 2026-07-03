@@ -1,0 +1,15 @@
+# A LOOSE grammar for an episode-structured outline.
+#
+# Design principle: force only the STRUCTURAL SKELETON (every output must be a
+# series of "## Episode N" sections), and keep the body PERMISSIVE (arbitrary
+# prose lines). This kills narration/preamble by construction — the model cannot
+# emit "The outline has been written to ..." because that text is not a legal
+# expansion of `root` — while preserving generation quality, because the body is
+# essentially unconstrained.
+#
+# Use with llama.cpp:  --grammar-file outline.gbnf   (or the `grammar` request field)
+# Cap max_tokens per request: an open-ended `section+` can otherwise run away.
+
+root     ::= section+
+section  ::= "## Episode " [0-9]+ "\n" bodyline+
+bodyline ::= [^\n]+ "\n"

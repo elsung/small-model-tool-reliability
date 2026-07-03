@@ -1,0 +1,14 @@
+# A GENERIC "must be a markdown document that opens with a heading" grammar.
+#
+# The minimal viable anti-narration constraint for ANY markdown artifact: force
+# the output to begin at a markdown heading, then allow arbitrary body content
+# (prose, lists, tables, code fences — all just lines). This alone eliminates the
+# "It appears... I will now write..." preamble and the "has been written to X"
+# narrated-completion failure, without constraining the substance of the document.
+#
+# Reach for this when you don't yet have a phase-specific grammar; specialize it
+# (like outline.gbnf) once you know the artifact's required structure.
+
+root     ::= heading line*
+heading  ::= "#" "#"? "#"? " " [^\n]+ "\n"
+line     ::= [^\n]* "\n"
