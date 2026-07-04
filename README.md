@@ -1,10 +1,16 @@
-# Making Small Models Reliable at Tool Calling
+# Making Small Models Reliable at Tool Calling (and Generation, in Production)
 
-**Why small local models narrate tool calls instead of making them — and how grammar-constrained decoding fixes it.**
+**Why small local models narrate tool calls instead of making them, why the fix has to be deployed carefully, and what else breaks once you run this in a real multi-box, multi-backend fleet.**
 
-A field report + methodology survey on getting reliable **tool use** and **structured output** out of small, locally-served instruction-tuned models (Gemma-4-12B class, Qwen3-14B class) inside an agentic, multi-tool, multi-turn loop.
+A field report + methodology survey on getting reliable **tool use**, **structured output**, and
+**bounded, safe generation** out of small, locally-served instruction-tuned models (Gemma-4-12B
+class, Qwen3-14B class, and abliterated/uncensored creative finetunes) inside an agentic,
+multi-tool, multi-turn loop — and, beyond the model behavior itself, out of the harness/serving
+plumbing that carries requests to those models in production.
 
-The short version: on a real multi-tool write phase, a Gemma-4-12B-class model **narrated completion** ("the outline has been written to `…`") instead of emitting the tool call about **25% of the time**. The obvious lever — `tool_choice: required` — does **not** fix it, because the serving stack does not grammar-enforce it for this model family. **Grammar-constrained decoding** does fix it: it masks illegal tokens *before sampling*, so narration is physically impossible. Measured result: **25% → 0% narration over ~45 real runs**, with output quality preserved.
+The short version, Part 1 (the core mechanism): on a real multi-tool write phase, a Gemma-4-12B-class model **narrated completion** ("the outline has been written to `…`") instead of emitting the tool call about **25% of the time**. The obvious lever — `tool_choice: required` — does **not** fix it, because the serving stack does not grammar-enforce it for this model family. **Grammar-constrained decoding** does fix it: it masks illegal tokens *before sampling*, so narration is physically impossible. Measured result: **25% → 0% narration over ~45 real runs**, with output quality preserved.
+
+The short version, Part 2 (production hardening — [docs/production-hardening.md](docs/production-hardening.md)): getting the *mechanism* right is not enough. In a real fleet, the grammar-forcing extension from Part 1 turned out to be silently inactive everywhere (a global plugin-discovery gap, not a code bug); the harness driving the model structurally could not forward sampler parameters at all; an uncapped generation on an abliterated creative finetune degenerated into an 88,000-character repetition loop; and a sampler parameter that's completely safe on one backend **crashed and wedged a production multi-node inference cluster** on another. Four more real incidents, four more durable fixes, all folded in below.
 
 ---
 
@@ -16,6 +22,7 @@ The short version: on a real multi-tool write phase, a Gemma-4-12B-class model *
 - [4. A tool-calling reliability matrix across models](./docs/model-matrix.md)
 - [5. The broader landscape (beyond GBNF)](./docs/methodology-landscape.md)
 - [6. Hardware & serving-backend notes](./docs/hardware-notes.md)
+- [7. Beyond the grammar: production-hardening the sampling pipeline](./docs/production-hardening.md)
 - [Appendix: example grammars](./examples/)
 
 ---
@@ -148,6 +155,31 @@ How the technique interacts with consumer/prosumer GPU classes (Pascal P40/P100,
 
 **→ [docs/hardware-notes.md](./docs/hardware-notes.md)**
 
+## 7. Beyond the grammar: production-hardening the sampling pipeline
+
+Getting grammar-constrained decoding (or any before-request injection technique) *working in a lab
+test* is a different problem from getting it *reliably active across a real fleet in production*.
+Four further incidents, each with a durable fix and the reasoning behind it:
+
+- **An extension can be "shipped" in code and still be inactive everywhere** — global plugin
+  discovery is host state, not repo state, and it silently drifted out of sync on every box. Fix:
+  ship the extension inside the calling engine's own repo and load it by explicit path, never rely
+  on discovery.
+- **A harness can structurally lack a field for the sampler parameter you need** — proven by
+  capturing a real outgoing request, not by assumption. Fix: an injection hook driven by an
+  environment variable, operating below the harness's own (incomplete) request builder.
+- **Uncapped generation is a real failure mode** — an abliterated creative finetune degenerated into
+  an 88,000-character repetition loop when nothing anywhere actually bounded its generation length,
+  even though the "right" repetition-control sampler settings were correctly configured server-side.
+  Fix: defense-in-depth — the model class's full recommended sampler profile, an unconditional
+  client-side token cap, and an independent server-side generation ceiling.
+- **A sampler parameter that's safe on one backend crashed and wedged a production multi-node
+  inference cluster on another** (health checks kept reporting healthy while generation hung).
+  Fix: a per-provider sampler-capability guard — a drop-and-log filter, empty by default, applied at
+  every transport, keyed on the specific deployment rather than a generic backend label.
+
+**→ [docs/production-hardening.md](./docs/production-hardening.md)**
+
 ---
 
 ## TL;DR for practitioners
@@ -157,5 +189,9 @@ How the technique interacts with consumer/prosumer GPU classes (Pascal P40/P100,
 3. **Grammar-constrained decoding is the durable fix.** It masks illegal tokens before sampling, so narration is impossible. ~25% → 0% over ~45 runs, quality preserved.
 4. **Keep grammars loose** (skeleton forced, body free) to dodge the constraint tax.
 5. **It's the universal lever** — sampler-level, so it works even where the native tool path is broken (e.g. SYCL builds where the templated path segfaults).
+6. **The mechanism being correct doesn't mean it's active** — verify any extension/hook is actually loaded on every host, not just that the code to load it exists; prefer ship-with-engine + explicit-path-load over global plugin discovery.
+7. **Harnesses can silently lack a sampler surface** — capture and inspect a real outgoing request before trusting that a config value has any effect; inject below the harness via an env-var-driven hook when it doesn't.
+8. **Uncapped generation is a production incident, not a theoretical risk**, especially on abliterated/uncensored finetunes — cap client-side *and* server-side, independently, and apply the model's full recommended sampler profile.
+9. **Sampler-parameter safety is per (backend, version, decoding-mode)** — the same "extra" parameter can crash, silently no-op, or work cleanly on different deployments of the same backend software. Guard with a default-empty, drop-and-log capability filter at every transport.
 
-*This is a sanitized field report; empirical numbers are from real runs on the model + hardware classes named above. Your mileage will vary with model family, serving build, and grammar design — measure it.*
+*This is a sanitized field report; empirical numbers are from real runs and real incidents on the model + hardware classes named above. Your mileage will vary with model family, serving build, backend version, and deployment topology — measure it, don't assume it.*
