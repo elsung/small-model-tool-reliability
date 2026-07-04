@@ -130,6 +130,19 @@ If your pipeline already has a fallback that *parses freeform text* when a tool 
 
 One practical caveat: with an open-ended grammar (`section+`), a large default `max_tokens` can let generation run away. **Cap `max_tokens` per phase** — it is required, not optional.
 
+**Phase-gate *every* phase, including the one that "just reads."** The obvious phases to route onto
+the capture/no-tools path are the ones that visibly write an artifact. The phase that's easy to miss
+is a **critique / reading / review pass** — a phase whose job is to read accumulated material and
+produce feedback or a judgment, not to write a new file. It's tempting to leave that phase on the
+native multi-tool path because "it's just reading, there's less that can go wrong." In practice it's
+the opposite: a review pass often has the *longest* prompt in the pipeline (it re-reads everything
+generated so far — see the [context-management repo](https://github.com/elsung/llm-context-management)
+on why per-phase prompt size grows over a job) and the same narration failure mode applies just as
+much to "I've reviewed it and it looks good" prose as it does to "the file has been written." **Route
+every phase's output through the same forced-structure / no-tools path, and don't carve out an
+exception for phases that "only" read** — the read/critique phase is the common holdout that quietly
+reintroduces the exact flake this document exists to eliminate.
+
 ---
 
 ## 4. A tool-calling reliability matrix across models
@@ -193,5 +206,20 @@ Four further incidents, each with a durable fix and the reasoning behind it:
 7. **Harnesses can silently lack a sampler surface** — capture and inspect a real outgoing request before trusting that a config value has any effect; inject below the harness via an env-var-driven hook when it doesn't.
 8. **Uncapped generation is a production incident, not a theoretical risk**, especially on abliterated/uncensored finetunes — cap client-side *and* server-side, independently, and apply the model's full recommended sampler profile.
 9. **Sampler-parameter safety is per (backend, version, decoding-mode)** — the same "extra" parameter can crash, silently no-op, or work cleanly on different deployments of the same backend software. Guard with a default-empty, drop-and-log capability filter at every transport.
+10. **Parse small-model output defensively — they're verbose and decorative.** Small models routinely
+    wrap their real output in extra, unbalanced markdown fences (banner-style ASCII art, decorative
+    headers). Naive "truncate at the first closing fence" extraction logic can wreck a perfectly good
+    document. See [docs/production-hardening.md §5](docs/production-hardening.md#5-small-models-are-decorative--pair-your-fences-dont-just-count-them).
+
+## Related work
+
+This repo covers **reliability of the generation mechanism itself** (tool calls, structured output,
+bounded/safe sampling). Its sibling repo, **[llm-context-management](https://github.com/elsung/llm-context-management)**,
+covers the companion problem — **keeping the *input* to that mechanism inside a real, working context
+budget** as pipelines accumulate state across phases (the same phased pipelines this repo's grammar
+and sampler fixes are applied to). The two compose: a phase can fail because the model narrated
+instead of writing (this repo), or because its prompt silently overflowed the box it was routed to
+(the context repo) — both failure modes look identical from the outside ("the job produced garbage or
+nothing"), so debugging either one should check both.
 
 *This is a sanitized field report; empirical numbers are from real runs and real incidents on the model + hardware classes named above. Your mileage will vary with model family, serving build, backend version, and deployment topology — measure it, don't assume it.*

@@ -19,6 +19,7 @@ have to get its *deployment* right.**
 - [2. Harnesses can't always send sampler params — you need an injection mechanism](#2-harnesses-cant-always-send-sampler-params--you-need-an-injection-mechanism)
 - [3. Uncapped generation is a real failure mode, not a theoretical one](#3-uncapped-generation-is-a-real-failure-mode-not-a-theoretical-one)
 - [4. Per-backend sampler-capability guard — a crash, not just a warning](#4-per-backend-sampler-capability-guard--a-crash-not-just-a-warning)
+- [5. Small models are decorative — pair your fences, don't just count them](#5-small-models-are-decorative--pair-your-fences-dont-just-count-them)
 
 ---
 
@@ -221,6 +222,42 @@ enforce X" is not evidence that X is actually enforced.** Verify liveness of eve
 independently, and apply redundant, independent enforcement for anything where an uncapped failure
 is expensive (a crashed job, a corrupted downstream artifact, a wedged server — see §4).
 
+### Generalizing beyond abliterated finetunes: a small-model-safe sampler floor
+
+The incident above is specifically about an abliterated/uncensored creative finetune, but the
+underlying mechanism — zero or near-zero repetition control letting open-ended generation loop —
+is **not confined to that model class.** Mainstream small instruction-tuned models in the
+Gemma-4-class / Nanbeige-class size range show the same degeneration mode on open-ended generation
+phases when served with no repeat-penalty and no DRY-family repetition control: without *some*
+repetition floor, the sampler has nothing stopping it from re-entering a high-probability loop once
+the model's local context runs out of genuinely novel continuations to prefer. Bigger frontier
+models are more resistant to this (deeper training signal keeps them self-terminating even under
+weak sampler settings), which is exactly why this failure mode is easy to miss if your prior serving
+experience is mostly with larger/hosted models — the failure only shows up once you're running small
+open-weight models yourself.
+
+**The fix that generalizes: apply a small-model-safe sampler *floor* — not the full aggressive
+profile from §3 above, but a minimum repetition-control baseline — unconditionally, on **every**
+phase, for every small model, regardless of whether that specific model or phase has been observed
+to degenerate yet.** A representative floor: `repeat_penalty` around **1.1** plus a DRY-family
+setting, left otherwise permissive. Two things matter about *how* this floor is applied:
+
+1. **Apply it as a phase-independent default, not a per-incident patch.** Adding the floor only to
+   the specific phase that was observed looping treats the symptom, not the class of risk — every
+   open-ended generation phase on a small model has the same latent exposure, observed or not.
+2. **Leave `temperature` and `top_p` alone.** It's tempting to "fix repetition" by also tightening
+   temperature — don't. Repetition and creativity are different axes: a repeat-penalty/DRY floor
+   targets the specific failure (looping), while temperature/top_p govern voice, variety, and
+   creative range. Tightening temperature to fight a repetition problem is over-constraining a
+   dimension that wasn't the cause, and it measurably narrows output quality for phases that need
+   genuine creative range (see the [context repo's goal-aware extraction doc](https://github.com/elsung/llm-context-management/blob/main/docs/04-goal-aware-extraction.md)
+   for the parallel point about not over-compacting the thing that isn't the actual problem).
+
+The result is a defense that's cheap to keep on all the time (a small, well-chosen repeat-penalty/DRY
+floor costs essentially nothing in quality for a model that wasn't going to loop anyway) and closes
+the exposure for the ones that would have, without having to wait for each one to fail in production
+first.
+
 ---
 
 ## 4. Per-backend sampler-capability guard — a crash, not just a warning
@@ -330,6 +367,69 @@ and intervene.
 
 ---
 
+## 5. Small models are decorative — pair your fences, don't just count them
+
+### The incident
+
+A downstream extraction step for a generated document — pull the actual artifact content out of the
+model's raw response text — used a simple heuristic: find the first closing markdown code fence
+(```` ``` ````) and treat everything before it as the document, on the assumption that a well-behaved
+model wraps its output in exactly one fenced block. On a real run, this truncated a full, valid,
+multi-page document down to **roughly 45 characters**, and the pipeline downstream reported "no
+usable document" — not because generation failed, but because the *extraction* logic destroyed a
+perfectly good output.
+
+### Why it happens
+
+Small models are **more decorative and more verbose than large ones about formatting**, especially on
+open-ended or creative generation phases. A small model will routinely emit things like an ASCII-art
+banner wrapped in its own code fence *before* the real content, a stray fenced example or aside
+*inside* the body of the document, or a closing fence that doesn't pair with the one the extractor
+assumed was the only one. None of this is malformed output by the model's own standards — from the
+model's point of view it produced a nicely decorated response. But naive extraction logic that treats
+"the first ``` closes the document" as a universal rule is implicitly assuming a large-model-style
+terseness and formatting discipline that small models frequently don't have.
+
+### The fix — fence-pairing, not fence-counting
+
+Treat code fences as **a stack, not a boolean toggle**: track open/close pairing through the whole
+response, and only ever trim content that falls **inside an odd/unclosed fence** (a fence that was
+opened but never properly closed by the time the response ends — the actual signature of "the model
+trailed off or got cut off mid-block," which is the case truncation is supposed to protect against).
+A fence that opens and closes cleanly, anywhere in the document, is not a truncation signal — it's
+just formatting, and its contents should be left alone.
+
+Concretely:
+
+```
+count fence markers in order
+if the count is even:              # every fence properly paired
+    do not trim anything based on fences at all
+if the count is odd:               # one fence never closed
+    trim only from the position of that LAST, unpaired opening fence onward
+    (this is the one case that actually indicates truncated/incomplete output)
+```
+
+**Second discipline: compare fenced-vs-unfenced candidate length, and take the longer/more-complete
+one, rather than assuming the fenced interpretation is always correct.** If naive fenced-extraction
+and a "just take the raw response, minus obviously decorative wrapper lines" candidate disagree
+sharply in length, that disagreement itself is a signal something about the fence assumption is
+wrong for this particular response — prefer the candidate that isn't drastically truncated rather
+than trusting the more "structured-looking" one blindly.
+
+### Why this generalizes
+
+The specific bug is markdown fences, but the general lesson is broader: **any extraction/parsing step
+that assumes a small model's output will have exactly the formatting shape you expect is a latent
+truncation or corruption bug.** Small models are trained on, and imitate, a huge variety of
+formatting conventions and are more prone to decorative or redundant markup than large frontier
+models tend to be in practice. Parse their output the way you'd parse untrusted user input — build in
+the assumption that it will be messier and more varied than the spec says, verify structural
+assumptions (like fence pairing) explicitly rather than taking a shortcut like "first delimiter
+wins," and prefer a fallback that keeps more content over one that silently discards it.
+
+---
+
 ## Practitioner takeaways
 
 1. **An extension/hook mechanism is only as good as its activation guarantee.** If activation
@@ -352,6 +452,14 @@ and intervene.
    than a generic backend-type label.
 5. **For any backend where a "wedge" (alive but non-functional) is possible, your health check has
    to actually exercise generation**, not just confirm the process is answering HTTP requests.
+6. **A repeat-penalty/DRY floor is cheap insurance to apply on every phase of every small model**,
+   not just the phase that has already been observed looping — the exposure is latent everywhere
+   until it isn't. Leave temperature/top_p alone; they govern voice and creative range, not
+   repetition, and tightening them doesn't fix a repetition problem.
+7. **Parse small-model output like untrusted input, not like a well-behaved large-model response.**
+   Small models are more decorative and formatting-inconsistent; a naive "first delimiter wins"
+   extraction rule is a latent truncation bug. Pair delimiters (fences, brackets, etc.) explicitly
+   and only trim on a genuinely unclosed one.
 
 *This is a sanitized field report; empirical numbers and configuration details are from real
 incidents on the model and hardware classes named above. Verify against your own build, backend
