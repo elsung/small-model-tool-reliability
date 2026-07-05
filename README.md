@@ -23,6 +23,7 @@ The short version, Part 2 (production hardening — [docs/production-hardening.m
 - [5. The broader landscape (beyond GBNF)](./docs/methodology-landscape.md)
 - [6. Hardware & serving-backend notes](./docs/hardware-notes.md)
 - [7. Beyond the grammar: production-hardening the sampling pipeline](./docs/production-hardening.md)
+- [8. Instruction adherence: order effects and freedom-scaled judging](./docs/instruction-adherence.md)
 - [Appendix: example grammars](./examples/)
 
 ---
@@ -193,6 +194,22 @@ Four further incidents, each with a durable fix and the reasoning behind it:
 
 **→ [docs/production-hardening.md](./docs/production-hardening.md)**
 
+## 8. Instruction adherence: order effects and freedom-scaled judging
+
+A downstream problem from everything above: even once a small model reliably produces well-formed
+output, does that output actually **honor a constrained-transform instruction**, or does it quietly
+default back to preserving what it was told to change? Two more findings, both measured: (1)
+**instruction order, not length or emphasis, controls whether a small model executes an
+identity/rename transform** — the same requirement placed first and fused to the primary verb got
+0/9 leaks of the source's own names; placed last, after a stack of other negations, got 76–184
+leaks per run, even though every *world/lore* negation held regardless of position; (2) an automated
+adherence judge that pauses on any drift is worse than none — the fix is a **freedom-scaled** judge
+that classifies instruction elements as HARD (must hold regardless of creative freedom granted) vs.
+SOFT (invited to transform), and only ever pauses on a HARD violation or total-intent abandonment,
+scaled to how much freedom the job actually granted.
+
+**→ [docs/instruction-adherence.md](./docs/instruction-adherence.md)**
+
 ---
 
 ## TL;DR for practitioners
@@ -210,16 +227,31 @@ Four further incidents, each with a durable fix and the reasoning behind it:
     wrap their real output in extra, unbalanced markdown fences (banner-style ASCII art, decorative
     headers). Naive "truncate at the first closing fence" extraction logic can wreck a perfectly good
     document. See [docs/production-hardening.md §5](docs/production-hardening.md#5-small-models-are-decorative--pair-your-fences-dont-just-count-them).
+11. **Instruction order controls whether a small model executes a constrained transform, decisively
+    more than the instruction's length or emphasis does** — lead with the identity/rename transform,
+    fused to the primary verb, as one absolute-scope clause; don't bury it under a stack of other
+    negations. Measured 0/9 leaks with that ordering vs. 76–184 leaks/run with the identical
+    requirement placed last. See [docs/instruction-adherence.md §1](docs/instruction-adherence.md#1-instruction-order-controls-adherence-decisively).
+12. **An adherence judge must be freedom-scaled, not zero-tolerance.** Classify instruction elements
+    HARD (must hold) vs. SOFT (invited to transform); pause only on a HARD violation or total-intent
+    abandonment, scaled to how much creative freedom the job granted. Bold transformation of a SOFT
+    element is success, never drift. See [docs/instruction-adherence.md §2](docs/instruction-adherence.md#2-freedom-scaled-adherence-judging).
 
 ## Related work
 
 This repo covers **reliability of the generation mechanism itself** (tool calls, structured output,
-bounded/safe sampling). Its sibling repo, **[llm-context-management](https://github.com/elsung/llm-context-management)**,
+bounded/safe sampling) — and, since §8, whether the *content* that mechanism produces actually
+adheres to a constrained instruction once it's producing well-formed output. Its sibling repo,
+**[llm-context-management](https://github.com/elsung/llm-context-management)**,
 covers the companion problem — **keeping the *input* to that mechanism inside a real, working context
 budget** as pipelines accumulate state across phases (the same phased pipelines this repo's grammar
 and sampler fixes are applied to). The two compose: a phase can fail because the model narrated
 instead of writing (this repo), or because its prompt silently overflowed the box it was routed to
 (the context repo) — both failure modes look identical from the outside ("the job produced garbage or
-nothing"), so debugging either one should check both.
+nothing"), so debugging either one should check both. §8's freedom-scaled adherence judge is a
+direct extension of that sibling repo's `freedom_lever`/directive concepts
+([docs/04 §4.2](https://github.com/elsung/llm-context-management/blob/main/docs/04-goal-aware-extraction.md#42-the-goal-triple--what-parameterizes-relevance))
+into a judging policy that should share the same job-level setting, not redefine "how much freedom"
+independently.
 
 *This is a sanitized field report; empirical numbers are from real runs and real incidents on the model + hardware classes named above. Your mileage will vary with model family, serving build, backend version, and deployment topology — measure it, don't assume it.*
