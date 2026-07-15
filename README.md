@@ -20,6 +20,7 @@ The short version, Part 2 (production hardening — [docs/production-hardening.m
 - [2. What does *not* work: `tool_choice: required`](#2-what-does-not-work-tool_choice-required)
 - [3. What works: grammar-constrained / guided decoding](#3-what-works-grammar-constrained--guided-decoding)
 - [4. A tool-calling reliability matrix across models](./docs/model-matrix.md)
+- [4b. The quant axis: aggressive quantization degrades tool-calling even on native-reliable families](./docs/quantization-and-tool-reliability.md)
 - [5. The broader landscape (beyond GBNF)](./docs/methodology-landscape.md)
 - [6. Hardware & serving-backend notes](./docs/hardware-notes.md)
 - [7. Beyond the grammar: production-hardening the sampling pipeline](./docs/production-hardening.md)
