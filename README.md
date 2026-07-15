@@ -23,6 +23,8 @@ The short version, Part 2 (production hardening — [docs/production-hardening.m
 - [4b. The quant axis: aggressive quantization degrades tool-calling even on native-reliable families](./docs/quantization-and-tool-reliability.md)
 - [4c. Does constraining hurt quality? The format-tax controversy, resolved](./docs/format-tax-and-generate-then-conform.md)
 - [4d. Capture vs. tool-calling: route by workload shape, not model name](./docs/capture-vs-tools-workload-shape.md)
+- [4e. Adherence degrades first: why your model stopped listening before it stopped working](./docs/adherence-degrades-first.md)
+- [4f. Small models and agentic loops: scaffold the loop, keep the judgment](./docs/small-models-and-agentic-loops.md)
 - [5. The broader landscape (beyond GBNF)](./docs/methodology-landscape.md)
 - [6. Hardware & serving-backend notes](./docs/hardware-notes.md)
 - [7. Beyond the grammar: production-hardening the sampling pipeline](./docs/production-hardening.md)
