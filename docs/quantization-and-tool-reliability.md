@@ -5,10 +5,40 @@ tool-calling reliability: the **maturity of the serving stack's tool parser for 
 (Hermes-style native parsers are reliable; the Gemma-4 family parser narrates under load). The matrix's
 headline is *"reliability tracks parser family, not model size."*
 
-That is true — but it is **not the whole story.** There is a **second, independent axis: how hard the
+That is true — but it may not be the whole story. There appears to be a **second axis: how hard the
 weights are quantized.** A model from a *native-reliable* family, served at full or near-full precision,
 tool-calls reliably; the **same model, same parser, same harness**, served at an aggressive sub-4-bit
 quant, starts to fail. Nothing about the parser family changed — only the number of bits per weight.
+
+> ## ⚠️ Evidence status — read before citing this page
+>
+> **This is a field observation, not an established result.** Be clear-eyed about what backs it:
+>
+> - **What we observed:** one deployment (below). n=1, uncontrolled, no A/B at matched prompt scale.
+> - **What the literature actually says:** we could find **no published measurement of IQ2_XXS — or
+>   any i-quant — against a function-calling benchmark.** That is a genuine gap, not a search failure.
+>   The nearest rigorous datapoint is [LlamaRestTest](https://arxiv.org/html/2501.08598v1)
+>   `[PEER-REVIEWED]`: Llama3-8B generating valid structured API parameters scores **72.44% at full
+>   precision → 66.12% (Q8) → 60.21% (Q4) → 29.12% (Q2)**, with the loss attributed to *invalid*
+>   responses — the right failure mode, but **legacy llama.cpp 2-bit, not IQ2_XXS**, and a structured-
+>   output proxy rather than tool-calling. Treat it as an upper bound on the damage, not an estimate.
+> - **Corroborating but indirect:** Unsloth's published GGUF metrics show **KLD99.9 ≈ 4.22 at IQ2_XXS
+>   vs ≈ 0.41 at Q4_K_XL** (~10×) — tail-token divergence is exactly what would break a terminal
+>   tool-call token, but it is a proxy, not a measurement of tool-calling.
+> - **FP8 is measured and safe.** NVIDIA's Nemotron-3-Nano BF16→FP8 shows ≤3.2 pt drops on tau-bench
+>   and −0.61 on BFCL v4; [KAMI](https://arxiv.org/html/2511.08042) finds FP8 *beating* full precision
+>   on Qwen3-14B/32B agentic tasks. **4-bit weight-only against tool-calling is simply unmeasured.**
+> - **llama.cpp upstream does not corroborate it.** Its only statement is an unsourced line in the
+>   function-calling docs warning about *KV-cache* quant (`-ctk q4_0`), with no data. No upstream issue
+>   links weight bit-width to tool-calling failure; upstream's real failures are parser/grammar
+>   contract bugs and tool fan-out.
+> - **Do not cite [CarbonCall](https://arxiv.org/html/2504.20348) for this.** It is widely read as
+>   evidence that quantization degrades function calling. It contains **no such measurement** — the
+>   claim appears only as unsupported motivating text.
+>
+> **Honest summary: "aggressive quant degrades tool-calling" is well-motivated and consistent with the
+> adjacent evidence, but unverified for i-quants specifically.** The engineering advice below is
+> defensive and cheap, so it stands on its own regardless. The claim does not.
 
 ## The observation
 
@@ -81,5 +111,16 @@ precision on the hosted tier. Size is still not the predictor; parser-family **a
 ## The one-line version
 
 *Parser-family maturity tells you whether a model tool-calls reliably at a given precision. Quantization
-level tells you whether that reliability survives the quant you actually deployed. You need both — a
-native-reliable family served at IQ2_XXS is not a native-reliable deployment.*
+level may tell you whether that reliability survives the quant you actually deployed — a native-reliable
+family served at IQ2_XXS should not be assumed to be a native-reliable deployment. Verify it on your own
+build; nobody has published the measurement.*
+
+## The measurement nobody has run
+
+If you want to contribute something genuinely new here: **sweep one model across FP16 / Q8 / Q4_K_M /
+IQ2_XXS against a real function-calling benchmark (BFCL, tau-bench) at realistic prompt scale, holding
+the parser, template, and tool set fixed.** As of mid-2026 that measurement does not exist publicly.
+Everyone — including this page — is extrapolating from perplexity, KL divergence, or adjacent
+structured-output proxies. Run it at your real artifact size, not on a toy prompt: the
+[matrix](./model-matrix.md) documents a model that is clean at reduced scale and flakes ~25% at full
+scale, so a small-prompt sweep will under-report.

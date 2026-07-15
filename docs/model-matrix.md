@@ -11,11 +11,14 @@ temperature). The point is the **shape of the finding**: reliability tracks the 
 maturity of the model family*, not model size. A 3B model with a mature native tool parser can beat a
 31B model with a fragile one.
 
-> **Second axis — quantization.** This matrix holds *within a fixed quant*. There is an independent
-> degrader: **aggressive quantization (sub-Q4: IQ2_XXS / Q2_K) erodes tool-calling even on a
-> native-reliable parser family** — the same big MoE that tool-calls flawlessly at FP8 can flail and
-> never terminate the turn at IQ2_XXS. So the full rule is *needs-grammar = fragile parser family **OR**
-> aggressive quant*. See [the quant axis](./quantization-and-tool-reliability.md).
+> **A possible second axis — quantization.** This matrix holds *within a fixed quant*. We observed a
+> big MoE that tool-calls reliably at FP8 flail and fail to terminate at IQ2_XXS, suggesting
+> **aggressive quantization (sub-Q4) may erode tool-calling even on a native-reliable parser family**
+> — which would make the rule *needs-grammar = fragile parser family **OR** aggressive quant*.
+> **This is a field observation, not a measurement**: no published study sweeps i-quants against a
+> function-calling benchmark, and FP8 is measurably fine. See the
+> [evidence status](./quantization-and-tool-reliability.md#️-evidence-status--read-before-citing-this-page)
+> before relying on it.
 
 ## Test method
 
