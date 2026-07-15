@@ -124,14 +124,46 @@ Mechanism verified from the abstract:
 > constraints are compiled into grammar-based token masks, **causing tool-call tokens to become
 > unreachable during decoding**."
 
-**The numbers are NOT in the abstract and are unverified — do not cite figures from this paper.**
-The *mechanism*, however, is a concrete hazard for anyone combining a grammar with tool-calling, and
-a plausible root cause of the **"writes the file fine but never terminates"** failure: if the
-terminal tool-call token is masked unreachable, the model **cannot** emit it.
+**The paper's numbers are NOT in its abstract and we could not verify them — do not cite figures
+from it.** The *mechanism*, though, is a concrete hazard for anyone combining a grammar with
+tool-calling, and a plausible root cause of the **"writes the file fine but never terminates"**
+failure: if the terminal tool-call token is masked unreachable, the model **cannot** emit it.
 
-**Test this before building a terminal-grammar fix on top of an active tool loop.** Either drop the
-tools (capture mode — see [capture vs. tools](./capture-vs-tools-workload-shape.md)) or verify your
-terminal token is still reachable under the mask. The two levers can silently cancel each other.
+### We reproduced it. `[MEASURED — our own fleet, 2026-07-15]`
+
+Because the paper's figures were unverifiable, we ran it ourselves. llama.cpp server, two models,
+identical request except for one field — **`tools` defined in every case**:
+
+| Model | A: tools only | B: tools **+** `response_format: json_schema` |
+|---|---|---|
+| **gemma-4-12b-qat** (fragile-parser family) | **3/3 tool calls** · `finish_reason: tool_calls` | **0/3** · `finish_reason: stop` |
+| **qwen3.5-9b** (native-reliable family) | **3/3 tool calls** · `finish_reason: tool_calls` | **0/3** · `finish_reason: stop` |
+
+**6/6 → 0/6. Total suppression, and it is NOT model-specific** — it hits the native-reliable
+Hermes-family model exactly as hard as the fragile-parser one. Adding a schema constraint alongside
+tools didn't degrade tool-calling; it **eliminated** it. The model silently produced schema-conformant
+prose instead, and `finish_reason` flipped `tool_calls` → `stop`. Nothing errored. Nothing warned.
+
+This is an **engine/mask-level** effect, not a small-model or quantization problem — which makes it
+one of the few findings on this site that applies to *every* tier.
+
+### What to do about it
+
+1. **Never enable a grammar/schema constraint and an active tool loop in the same request.** They
+   are mutually exclusive in practice. Pick one.
+2. **If you need structure, drop the tools** — [capture mode](./capture-vs-tools-workload-shape.md)
+   sidesteps this entirely, because there are no tool tokens left to mask.
+3. **If you need the tool loop, drop the schema** and constrain nothing; use
+   `tool_choice: "required"` instead, which (in llama.cpp) makes the tool grammar *non-lazy* so it
+   binds from token 0 — a documented, well-tested path that doesn't fight the mask.
+4. **Test your own build before trusting either.** This took ~10 minutes and inverted a design we
+   were about to ship. A "terminal grammar" bolted onto a tool-using phase would have taken it from
+   3/3 to 0/3 — a fix that silently breaks the thing it was meant to repair.
+
+> **The generalizable lesson:** a constraint you add and a capability you rely on can cancel each
+> other **silently, at 100%, with a success-shaped response.** No exception, no warning, `HTTP 200`,
+> a plausible `finish_reason`. Verify the capability you depend on *under the exact configuration you
+> ship* — not in isolation.
 
 ## 8. Practitioner takeaways
 
